@@ -85,16 +85,31 @@ def procesar_variaciones_multimedia(crf=21, preset="medium", seed=None):
         {"name": "saturacion_alta", "vf": "eq=saturation=1.05"}, {"name": "calido", "vf": "colorbalance=rs=0.02"}, {"name": "frio", "vf": "colorbalance=bs=0.02"}
     ]
     
-    # Recetas de audio mucho más potentes
+    # Recetas de audio — organizadas por efectividad contra fingerprinting
     recetas_audio_mejoradas = [
-        {"name": "pitch_up_fuerte", "af": "asetrate=44100*1.04,aresample=44100"},
-        {"name": "pitch_down_fuerte", "af": "asetrate=44100*0.96,aresample=44100"},
-        {"name": "tempo_rapido_fuerte", "af": "atempo=1.05"},
-        {"name": "tempo_lento_fuerte", "af": "atempo=0.95"},
-        {"name": "bass_boost", "af": "equalizer=f=60:width_type=h:width=20:g=3"},
-        {"name": "treble_boost", "af": "equalizer=f=8000:width_type=h:width=2000:g=3"},
-        {"name": "radio_effect", "af": "highpass=f=300,lowpass=f=3000"},
-        {"name": "rapido_y_agudo", "af": "atempo=1.03,asetrate=44100*1.02,aresample=44100"},
+        # --- Pitch / Tempo (cambia tono/velocidad, tolerancia ~+-10% en deteccion) ---
+        {"name": "pitch_up",       "af": "asetrate=44100*1.04,aresample=44100"},
+        {"name": "pitch_down",     "af": "asetrate=44100*0.96,aresample=44100"},
+        {"name": "tempo_up",       "af": "atempo=1.05"},
+        {"name": "tempo_down",     "af": "atempo=0.95"},
+
+        # --- REVERB / ECHO (MUY EFECTIVO: destruye los landmarks temporales del fingerprint)
+        #     Suena bien: agrega presencia de sala, natural en musica ---
+        {"name": "reverb_chico",   "af": "aecho=0.8:0.9:30:0.25"},
+        {"name": "reverb_mediano", "af": "aecho=0.8:0.9:50:0.30"},
+        {"name": "reverb_doble",   "af": "aecho=0.8:0.8:40|20:0.25|0.20"},
+
+        # --- CHORUS (MUY EFECTIVO: duplica audio con delay variable, cambia espectrograma)
+        #     Suena bien: hace el audio mas 'amplio' y profesional ---
+        {"name": "chorus_suave",   "af": "chorus=0.5:0.9:50:0.4:0.25:2"},
+        {"name": "chorus_amplio",  "af": "chorus=0.5:0.9:55|40:0.4|0.3:0.25|0.2:2|2"},
+
+        # --- PHASER (EFECTIVO: modifica relaciones de fase, casi imperceptible al oido) ---
+        {"name": "phaser_leve",    "af": "aphaser=in_gain=0.4:out_gain=0.74:delay=3:decay=0.4:speed=0.5:type=1"},
+
+        # --- EQ / filtros de banda ---
+        {"name": "radio_effect",   "af": "highpass=f=300,lowpass=f=3000"},
+        {"name": "bass_boost",     "af": "equalizer=f=60:width_type=h:width=20:g=3"},
     ]
 
     # ===== PROCESAMIENTO DE ARCHIVOS MULTIMEDIA =====

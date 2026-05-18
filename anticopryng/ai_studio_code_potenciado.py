@@ -99,15 +99,30 @@ def procesar_variaciones_multimedia(crf=23, preset="medium", seed=None):
         {"name": "blur_ligero", "vf": "gblur=sigma=0.1"}
     ]
     
-    # Recetas de audio con parámetros dinámicos para máxima evasión.
+    # Recetas de audio potenciadas — segunda pasada, parametros mas agresivos
     recetas_audio_mejoradas = [
-        {"name": "pitch_up", "af": f"asetrate=44100*{get_random_value(1.03, 0.01)},aresample=44100"},
-        {"name": "pitch_down", "af": f"asetrate=44100*{get_random_value(0.97, 0.01)},aresample=44100"},
-        {"name": "tempo_rapido", "af": f"atempo={get_random_value(1.04, 0.01)}"},
-        {"name": "tempo_lento", "af": f"atempo={get_random_value(0.96, 0.01)}"},
-        {"name": "boost_eq", "af": f"equalizer=f={random.randint(60, 8000)}:width_type=h:width=200:g={random.randint(2, 4)}"},
-        {"name": "efecto_radio", "af": "highpass=f=300,lowpass=f=3000"},
-        {"name": "combo_aleatorio", "af": f"atempo={get_random_value(1.02, 0.01)},asetrate=44100*{get_random_value(1.01, 0.01)},aresample=44100"},
+        # --- Pitch / Tempo con valores dinamicos ---
+        {"name": "pitch_up",       "af": f"asetrate=44100*{get_random_value(1.03, 0.01)},aresample=44100"},
+        {"name": "pitch_down",     "af": f"asetrate=44100*{get_random_value(0.97, 0.01)},aresample=44100"},
+        {"name": "tempo_rapido",   "af": f"atempo={get_random_value(1.04, 0.01)}"},
+        {"name": "tempo_lento",    "af": f"atempo={get_random_value(0.96, 0.01)}"},
+
+        # --- REVERB mas intenso (segunda pasada — acumula efecto espacial) ---
+        #     Suena a sala de conciertos, natural para mariachi ---
+        {"name": "reverb_fuerte",  "af": f"aecho=0.8:0.85:{int(get_random_value(60,15))}:0.35"},
+        {"name": "reverb_triple",  "af": f"aecho=0.8:0.8:{int(get_random_value(40,10))}|{int(get_random_value(20,5))}:0.28|0.18"},
+
+        # --- CHORUS mas amplio (segunda pasada — estereo mas pronunciado) ---
+        {"name": "chorus_potente", "af": f"chorus=0.5:0.9:{int(get_random_value(55,8))}|{int(get_random_value(38,6))}:0.45|0.35:{get_random_value(0.28,0.05):.3f}|{get_random_value(0.22,0.04):.3f}:2|2"},
+
+        # --- PHASER + REVERB combinados (segunda pasada — doble ruptura de fingerprint) ---
+        {"name": "phaser_reverb",  "af": f"aphaser=in_gain=0.4:out_gain=0.74:delay={get_random_value(3,1):.1f}:decay=0.4:speed=0.5:type=1,aecho=0.8:0.9:{int(get_random_value(35,10))}:0.25"},
+
+        # --- CHORUS + PITCH combinados ---
+        {"name": "chorus_pitch",   "af": f"chorus=0.5:0.9:50:0.4:0.25:2,asetrate=44100*{get_random_value(1.02,0.01)},aresample=44100"},
+
+        # --- EQ dinamico ---
+        {"name": "boost_eq",       "af": f"equalizer=f={random.randint(60, 8000)}:width_type=h:width=200:g={random.randint(2, 4)}"},
     ]
 
     # ===== PROCESAMIENTO DE ARCHIVOS MULTIMEDIA =====
