@@ -59,10 +59,11 @@ def procesar():
         # Sintaxis correcta: chorus=in_gain:out_gain:delay:decay:speed:depth
         chorus_filter = f"chorus={chorus_in_gain}:{chorus_out_gain}:{chorus_delay}:{chorus_decay}:{chorus_speed}:{chorus_depth}"
         
-        # Arma #3: Equalizer - Modifica bandas de frecuencia
+        # Arma #3: Equalizer - Modifica bandas de frecuencia (ganancia acotada para evitar
+        # el error 'Assertion failed: el >= 0' en libmp3lame/psymodel)
         eq_freq = get_random_value(3000, 500)
         eq_width = get_random_value(1000, 200)
-        eq_gain = get_random_value(-2, 1)
+        eq_gain = get_random_value(0, 1.5)   # Solo positivo: -1.5 a +1.5 dB (seguro para lame)
         eq_filter = f"equalizer=f={eq_freq}:width_type=h:width={eq_width}:g={eq_gain}"
         
         # Arma #4: Tremolo - Modulación de amplitud (opcional, comentada para no sobrecargar)
@@ -86,8 +87,11 @@ def procesar():
         comando = []
         if extension.lower() == '.mp3':
             comando = [
-                ffmpeg_cmd, "-y", "-i", src_path, "-af", af_chain,
-                "-c:a", "libmp3lame", "-b:a", "192k", "-map_metadata", "-1", dst_path
+                ffmpeg_cmd, "-y", "-i", src_path,
+                "-map", "0:a",          # Solo stream de audio, descarta portada/imagen incrustada
+                "-af", af_chain,
+                "-c:a", "libmp3lame", "-b:a", "192k",
+                "-map_metadata", "-1", dst_path
             ]
         elif extension.lower() == '.mp4':
             comando = [

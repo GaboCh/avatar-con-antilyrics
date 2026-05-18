@@ -112,7 +112,9 @@ def procesar_variaciones_multimedia(crf=23, preset="medium", seed=None):
 
     # ===== PROCESAMIENTO DE ARCHIVOS MULTIMEDIA =====
     for i, src_path in enumerate(media_files):
-        base_name = os.path.splitext(os.path.basename(src_path))[0]
+        # Tomar solo el nombre original (antes de cualquier sufijo de receta)
+        raw_name = os.path.splitext(os.path.basename(src_path))[0]
+        base_name = raw_name.split('__')[0][:60]  # Max 60 chars, nombre limpio
         extension = os.path.splitext(src_path)[1].lower()
         cmd, recipe_name, dst_path = [], "", ""
 

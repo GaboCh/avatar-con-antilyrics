@@ -91,9 +91,10 @@ def descargar_usuario(username, max_videos):
 
 def procesar_usuario(username, num_ciclos, es_shorts):
     """
-    Aplica anticopyright a todos los .mp4 de videos_originales/{username}/
+    Generador: aplica anticopyright a todos los .mp4 de videos_originales/{username}/
     y mueve los procesados a videos_procesados/{username}/.
-    Retorna lista de rutas de videos procesados.
+    Hace yield de cada linea de log del proceso en tiempo real.
+    Al terminar hace yield de la lista de rutas procesadas como ultimo valor.
     """
     carpeta_in  = os.path.join(VIDEOS_ORIGINALES, username)
     carpeta_out = os.path.join(VIDEOS_PROCESADOS, username)
@@ -114,29 +115,45 @@ def procesar_usuario(username, num_ciclos, es_shorts):
             os.makedirs(w_out)
             shutil.copy(video_path, w_in)
 
+            yield f"      Video {i+1}/{len(videos)}: {os.path.basename(video_path)}"
+
             cmd = [
-                sys.executable, APP_VIDEO_SCRIPT,
+                sys.executable, '-u', APP_VIDEO_SCRIPT,
                 w_in, w_out,
                 str(int(num_ciclos)),
                 '1' if es_shorts else '0',
             ]
-            subprocess.run(
-                cmd, capture_output=True, text=True,
-                encoding='utf-8', errors='ignore'
+            proceso = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
+                text=True,
+                encoding='utf-8',
+                errors='ignore'
             )
+            for linea_raw in proceso.stdout:
+                linea_raw = linea_raw.rstrip()
+                if linea_raw:
+                    yield f"      | {linea_raw}"
+            proceso.wait()
 
             archivos = glob.glob(os.path.join(w_in, '*.mp4'))
             if archivos:
                 destino = os.path.join(carpeta_out, os.path.basename(archivos[0]))
                 shutil.move(archivos[0], destino)
                 procesados.append(destino)
-        except Exception:
-            pass
+                yield f"      OK guardado: {os.path.basename(destino)}"
+            else:
+                yield f"      WARN: no se genero video de salida para {os.path.basename(video_path)}"
+
+        except Exception as e:
+            yield f"      ERR: {e}"
         finally:
             if os.path.exists(work):
                 shutil.rmtree(work)
 
-    return procesados
+    # Ultimo yield: devuelve la lista de procesados para que el orquestador la use
+    yield procesados
 
 
 # ─────────────────────────────────────────────
@@ -246,14 +263,21 @@ def proceso_multi_usuario(
 
     for u in usuarios:
         if stop_event.is_set():
-            yield "⏹️ Proceso detenido por el usuario."
+            yield "Proceso detenido por el usuario."
             return
-        yield f"   🔄 Procesando @{u}..."
+        yield f"   >> Procesando @{u} con anticopyright..."
         try:
-            procesados = procesar_usuario(u, num_ciclos, es_shorts)
-            yield f"   ✅ @{u}: {len(procesados)} videos procesados"
+            procesados = []
+            for item in procesar_usuario(u, num_ciclos, es_shorts):
+                if isinstance(item, list):
+                    # Ultimo valor: lista de archivos procesados
+                    procesados = item
+                else:
+                    # Linea de log en tiempo real
+                    yield item
+            yield f"   OK @{u}: {len(procesados)} videos procesados"
         except Exception as e:
-            yield f"   ❌ @{u}: Error — {e}"
+            yield f"   ERR @{u}: {e}"
 
     # ── PASO 3: Cola round-robin ──────────────────────────────
     yield f"\n📋 PASO 3/3 — Construyendo cola round-robin ({int(n_por_usuario)} por usuario)..."

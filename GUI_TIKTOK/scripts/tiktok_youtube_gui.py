@@ -230,112 +230,103 @@ def descargar_favoritos_tiktok(username, max_videos):
 # =========================================================
 
 def iniciar_anticopyright(num_ciclos, es_shorts=False):
-    print("\n========== DEBUG ANTICOPY ==========")
-    print("num_ciclos:", num_ciclos)
-    print("es_shorts :", es_shorts)
-    print("APP_VIDEO_SCRIPT:", APP_VIDEO_SCRIPT)
-    print("VIDEOS_ORIGINALES:", VIDEOS_ORIGINALES)
-    print("VIDEOS_PROCESADOS:", VIDEOS_PROCESADOS)
-    print("====================================\n")
-    
-    console.clear_buffer()
-    console.start_redirect()
+    """
+    Generador: hace yield del log acumulado despues de cada linea del subproceso.
+    Gradio 4 muestra el resultado en tiempo real cuando la funcion es un generador.
+    """
+    lineas = []
+
+    def log(msg):
+        lineas.append(msg)
+
+    def pantalla():
+        return "\n".join(lineas)
 
     if not os.path.exists(APP_VIDEO_SCRIPT):
-        print(f"❌ No se encontró app_video.py en: {GUI_ANTICOPY_DIR}")
-        print("   Asegúrate de que la carpeta GUI/anticopryng/ existe.")
-        output = console.get_buffer()
-        console.stop_redirect()
-        return output
+        yield f"❌ No se encontró app_video.py en: {GUI_ANTICOPY_DIR}\n   Asegúrate de que la carpeta anticopryng/ existe."
+        return
 
     videos = sorted(glob.glob(os.path.join(VIDEOS_ORIGINALES, '*.mp4')))
     if not videos:
-        print(f"⚠️ No hay videos en {VIDEOS_ORIGINALES}")
-        print("   Descarga videos primero en la Pestaña 2.")
-        output = console.get_buffer()
-        console.stop_redirect()
-        return output
+        yield f"⚠️ No hay videos en {VIDEOS_ORIGINALES}\n   Descarga videos primero en la Pestaña 2."
+        return
 
-    print(f"🛡️ Anticopyright: {len(videos)} videos × {int(num_ciclos)} ciclos")
-    print(f"   Usando scripts de: {GUI_ANTICOPY_DIR}")
-    print("=" * 60)
+    log(f"🛡️ Anticopyright: {len(videos)} videos × {int(num_ciclos)} ciclos")
+    log(f"   Scripts en: {GUI_ANTICOPY_DIR}")
+    log("=" * 60)
+    yield pantalla()
 
     os.makedirs(VIDEOS_PROCESADOS, exist_ok=True)
 
-    def procesar_video(idx, video_path):
-        work = os.path.join(gui_tiktok_dir, f'temp_anticopy_{idx}')
+    for idx, video_path in enumerate(videos):
+        nombre = os.path.basename(video_path)
+        log(f"\n🔄 [{idx+1}/{len(videos)}] Procesando: {nombre}")
+        yield pantalla()
+
+        work  = os.path.join(gui_tiktok_dir, f'temp_anticopy_{idx}')
         w_in  = os.path.join(work, 'videos_finales')
         w_out = os.path.join(work, 'videos_finales_procesados')
-        nombre = os.path.basename(video_path)
-        msgs = [f"\n🔄 Video {idx+1}/{len(videos)}: {nombre}"]
+
         try:
             if os.path.exists(work):
                 shutil.rmtree(work)
             os.makedirs(w_in)
             os.makedirs(w_out)
             shutil.copy(video_path, w_in)
-            print("\n--- DEBUG PROCESO VIDEO ---")
-            print("video:", video_path)
-            print("work :", work)
-            print("input:", w_in)
-            print("output:", w_out)
 
             cmd = [
-                sys.executable,
+                sys.executable, "-u",   # -u = stdout sin buffer
                 APP_VIDEO_SCRIPT,
                 w_in,
                 w_out,
                 str(int(num_ciclos)),
                 "1" if es_shorts else "0"
             ]
-            print("\n--- DEBUG PROCESO VIDEO ---")
-            print("video :", video_path)
-            print("work  :", work)
-            print("input :", w_in)
-            print("output:", w_out)
-            print("CMD   :", " ".join(cmd))
-            print("----------------------------")
+            log(f"   CMD: {' '.join(cmd)}")
+            yield pantalla()
 
-            resultado = subprocess.run(
+            # Leer salida linea por linea en tiempo real
+            proceso = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT,
                 text=True,
                 encoding='utf-8',
                 errors='ignore'
             )
-            print("RETURN CODE:", resultado.returncode)
-            print("STDOUT:", resultado.stdout)
-            print("STDERR:", resultado.stderr)
-            if resultado.stdout:
-                for linea in resultado.stdout.strip().splitlines():
-                    msgs.append(f"     | {linea}")
-            archivos = glob.glob(os.path.join(w_in, '*.mp4'))
-            if archivos:
-                nombre_final = os.path.basename(archivos[0])
-                shutil.move(archivos[0], os.path.join(VIDEOS_PROCESADOS, nombre_final))
-                msgs.append(f"   ✅ Guardado: {nombre_final}")
+            for linea_raw in proceso.stdout:
+                linea_raw = linea_raw.rstrip()
+                if linea_raw:
+                    log(f"   | {linea_raw}")
+                    yield pantalla()
+            proceso.wait()
+
+            if proceso.returncode != 0:
+                log(f"   ❌ Proceso terminó con código: {proceso.returncode}")
+                yield pantalla()
             else:
-                msgs.append(f"   ❌ No se generó salida.")
-                if resultado.stderr:
-                    msgs.append(f"   Error: {resultado.stderr[:300]}")
+                archivos = glob.glob(os.path.join(w_in, '*.mp4'))
+                if archivos:
+                    nombre_final = os.path.basename(archivos[0])
+                    shutil.move(archivos[0], os.path.join(VIDEOS_PROCESADOS, nombre_final))
+                    log(f"   ✅ Guardado en procesados: {nombre_final}")
+                else:
+                    log(f"   ❌ No se encontró video de salida en {w_in}")
+                yield pantalla()
+
         except Exception as e:
-            msgs.append(f"   ❌ Error: {e}")
+            log(f"   ❌ Error inesperado: {e}")
+            yield pantalla()
         finally:
             if os.path.exists(work):
                 shutil.rmtree(work)
-        return "\n".join(msgs)
 
-    MAX_WORKERS = 3
-    print(f"⚡ Procesando {len(videos)} videos en paralelo (máx {MAX_WORKERS} a la vez)...")
-    with ThreadPoolExecutor(max_workers=MAX_WORKERS) as executor:
-        futures = {executor.submit(procesar_video, i, v): i for i, v in enumerate(videos)}
-        for future in as_completed(futures):
-            print(future.result())
+    log(f"\n{'*'*60}")
+    log(f"✅ Anticopyright completado.")
+    log(f"   Videos listos en: {VIDEOS_PROCESADOS}")
+    log(f"{'*'*60}")
+    yield pantalla()
 
-    print(f"\n{'*'*60}\n✅ Anticopyright completado.\nVideos listos en: {VIDEOS_PROCESADOS}\n{'*'*60}")
-    output = console.get_buffer()
-    console.stop_redirect()
-    return output
 
 
 # =========================================================
@@ -617,10 +608,6 @@ def limpiar_carpetas(limpiar_originales, limpiar_procesados, limpiar_temp=True):
 
 _MU_MAX_CANALES = 8   # numero maximo de slots de canal en la UI
 
-def _mu_update_rows(n):
-    """Muestra u oculta filas de canal segun cuantos se seleccionaron."""
-    n = int(n)
-    return [gr.update(visible=(i < n)) for i in range(_MU_MAX_CANALES)]
 
 def _mu_get_estado(nombre):
     try:
@@ -655,12 +642,12 @@ def _mu_borrar_y_estado(nombre):
     msg = multi_canal_auth.eliminar_canal(nombre)
     return msg, _mu_get_estado(nombre)
 
-def _mu_iniciar(texto_usuarios, num_canales, *rest):
+def _mu_iniciar(texto_usuarios, *rest):
     """
     Wrapper que recoge nombres y checks del UI y llama proceso_multi_usuario.
     rest = [name0..name7, ch0..ch7, max, rr, ciclos, prueba, titulo, desc, shorts, tags, tags_modo]
     """
-    n      = int(num_canales)
+    n      = _MU_MAX_CANALES
     names  = rest[:_MU_MAX_CANALES]
     checks = rest[_MU_MAX_CANALES:_MU_MAX_CANALES * 2]
     params = rest[_MU_MAX_CANALES * 2:]
@@ -706,7 +693,7 @@ with gr.Blocks() as demo:
                 "3. Exporta las cookies de `tiktok.com` y pégalas aquí."
             )
             cookies_editor = gr.Textbox(
-                value=get_cookies_content, label="🍪 Cookies de TikTok",
+                value=get_cookies_content(), label="🍪 Cookies de TikTok",
                 lines=10, placeholder="Pega el contenido del archivo de cookies Netscape..."
             )
             with gr.Row():
@@ -733,7 +720,7 @@ with gr.Blocks() as demo:
             gr.Markdown("Descarga los videos públicos de cualquier perfil. Las cookies de la Pestaña 1 ayudan a evitar bloqueos.")
             with gr.Row():
                 username_input    = gr.Textbox(label="👤 Usuario TikTok (sin @)", placeholder="usuario")
-                max_videos_slider = gr.Slider(1, 100, value=20, step=1, label="Máximo de videos")
+                max_videos_slider = gr.Slider(minimum=1, maximum=100, value=20, step=1, label="Máximo de videos")
             btn_descargar = gr.Button("🚀 Iniciar Descarga", variant="primary")
 
         # --- PESTAÑA 3 ---
@@ -743,7 +730,7 @@ with gr.Blocks() as demo:
                 "Toma los videos descargados de TikTok y les aplica transformaciones "
                 "sutiles de video y audio. Usa los mismos scripts del GUI principal."
             )
-            ciclos_slider = gr.Slider(1, 5, value=2, step=1, label="Número de ciclos de procesamiento")
+            ciclos_slider = gr.Slider(minimum=1, maximum=5, value=2, step=1, label="Número de ciclos de procesamiento")
             shorts_anticopy_cb = gr.Checkbox(
                 label="📱 Convertir a vertical 9:16 (fondo difuminado — necesario para Shorts)", value=True
             )
@@ -815,8 +802,8 @@ with gr.Blocks() as demo:
             gr.Markdown("Hace todo el proceso de una sola vez.")
             with gr.Row():
                 pc_usuario = gr.Textbox(label="👤 Usuario TikTok (sin @)", placeholder="usuario")
-                pc_max     = gr.Slider(1, 100, value=10, step=1, label="Máx. videos")
-                pc_ciclos  = gr.Slider(1, 5, value=3, step=1, label="Ciclos anticopyright")
+                pc_max     = gr.Slider(minimum=1, maximum=100, value=10, step=1, label="Máx. videos")
+                pc_ciclos  = gr.Slider(minimum=1, maximum=5, value=3, step=1, label="Ciclos anticopyright")
             with gr.Row():
                 pc_titulo  = gr.Textbox(label="📝 Título base YouTube", value="Video")
                 pc_desc    = gr.Textbox(label="📋 Descripción", lines=2)
@@ -857,11 +844,6 @@ with gr.Blocks() as demo:
             )
             with gr.Column():
                 _canales_lista  = multi_canal_auth.listar_canales()
-                _mu_initial_n   = max(1, len(_canales_lista))
-                mu_num_canales  = gr.Dropdown(
-                    choices=list(range(1, _MU_MAX_CANALES + 1)),
-                    value=_mu_initial_n, label="Cuantos canales?"
-                )
                 mu_rows      = []
                 mu_checks    = []
                 mu_names     = []
@@ -870,8 +852,8 @@ with gr.Blocks() as demo:
                 mu_del_btns  = []
                 for _i in range(_MU_MAX_CANALES):
                     _def_name = _canales_lista[_i] if _i < len(_canales_lista) else f"canal_{_i + 1}"
-                    with gr.Row(visible=(_i < _mu_initial_n)) as _row:
-                        _ch = gr.Checkbox(label="Usar", value=False, scale=1)
+                    with gr.Row() as _row:
+                        _ch = gr.Checkbox(label="Usar", value=False)
                         _nm = gr.Textbox(value=_def_name, label=f"Canal {_i + 1}", scale=2, placeholder="Nombre del canal")
                         _st = gr.Textbox(value=_mu_get_estado(_def_name), label="Estado", interactive=False, scale=3)
                         _ab = gr.Button("🔑 Autenticar", scale=1)
@@ -885,9 +867,9 @@ with gr.Blocks() as demo:
                 btn_mu_refresh = gr.Button("🔄 Refrescar estado")
 
             with gr.Row():
-                mu_max    = gr.Slider(1, 100, value=10, step=1, label="Videos por usuario")
-                mu_rr     = gr.Slider(1, 10,  value=2,  step=1, label="Videos por usuario antes de cambiar canal")
-                mu_ciclos = gr.Slider(1, 5,   value=2,  step=1, label="Ciclos anticopyright")
+                mu_max    = gr.Slider(minimum=1, maximum=100, value=10, step=1, label="Videos por usuario")
+                mu_rr     = gr.Slider(minimum=1, maximum=10,  value=2,  step=1, label="Videos por usuario antes de cambiar canal")
+                mu_ciclos = gr.Slider(minimum=1, maximum=5,   value=2,  step=1, label="Ciclos anticopyright")
             with gr.Row():
                 mu_titulo = gr.Textbox(label="Titulo base YouTube", value="Video", placeholder="Mi video")
                 mu_desc   = gr.Textbox(label="Descripcion", lines=2, placeholder="Descripcion para todos los videos")
@@ -932,14 +914,13 @@ with gr.Blocks() as demo:
     btn_mc_borrar.click(fn=multi_canal_auth.eliminar_canal, inputs=mc_canal_borrar, outputs=output_console)
 
     # Eventos pestaña 8 — Multi-usuario
-    mu_num_canales.change(fn=_mu_update_rows, inputs=mu_num_canales, outputs=mu_rows)
     btn_mu_refresh.click(fn=_mu_refrescar_estados, inputs=mu_names, outputs=mu_status)
     for _i in range(_MU_MAX_CANALES):
         mu_auth_btns[_i].click(fn=_mu_autenticar_y_estado, inputs=[mu_names[_i]], outputs=[mu_console, mu_status[_i]])
         mu_del_btns[_i].click(fn=_mu_borrar_y_estado, inputs=[mu_names[_i]], outputs=[mu_console, mu_status[_i]])
     btn_mu_iniciar.click(
         fn=_mu_iniciar,
-        inputs=[mu_usuarios, mu_num_canales] + mu_names + mu_checks +
+        inputs=[mu_usuarios] + mu_names + mu_checks +
                [mu_max, mu_rr, mu_ciclos, mu_prueba, mu_titulo, mu_desc, mu_shorts, mu_tags, mu_tags_modo],
         outputs=mu_console
     )
