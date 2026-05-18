@@ -1,0 +1,38 @@
+backend_avatar - Instrucciones básicas
+
+Este proyecto contiene microservicios para generación de imágenes, audio y prompts que serán consumidos por el proyecto principal avatar.
+
+⚙️ Cómo activar el entorno e instalar dependencias
+
+1. Ir a la carpeta del proyecto
+
+cd C:\Users\tu_usuario\proyectos\IA\avatar\backend_avatar
+
+2. Crear el entorno virtual (solo la primera vez)
+
+python -m venv entorno
+
+3. Activar el entorno virtual
+
+.\entorno\Scripts\activate
+
+4. Instalar las dependencias
+
+pip install -r requirements.txt
+
+Listo, ya podés levantar los microservicios en sus respectivas carpetas.
+
+****
+deactivate
+Remove-Item -Recurse -Force .\entorno\
+python -m venv entorno
+.\entorno\Scripts\activate
+pip install -r requirements.txt
+cd .\forge_service\
+python app.py
+
+
+---
+Ctrl + Shift + P
+
+Python: Select Interpreter

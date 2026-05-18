@@ -1,0 +1,25 @@
+.env
+__pycache__/
+*.pyc
+venv/
+entorno/
+
+# Videos - no subir al repositorio
+*.mp4
+*.avi
+*.mov
+*.mkv
+*.webm
+*.flv
+*.wmv
+
+# Ignorar videos descargados y resultados temporales de la GUI de TikTok
+GUI_TIKTOK/proyectos_tiktok/videos_originales/
+GUI_TIKTOK/proyectos_tiktok/videos_procesados/
+GUI_TIKTOK/temp_anticopy/
+
+# Secrets and Credentials
+*.pickle
+client_secrets.json
+*cookies.txt
+*.log

@@ -1,0 +1,56 @@
+🎙️ Servicio Flask - Transcripción a SRT con Whisper WebUI
+Este servicio recibe un archivo de audio, lo transcribe usando la API REST de Whisper WebUI (puerto 8000) y devuelve el subtítulo .srt.
+
+🚀 Cómo usar
+1. Inicia tu servidor Whisper WebUI REST
+Asegúrate de que el backend de Whisper-WebUI está corriendo en:
+
+bash
+Copiar
+Editar
+.\venv\Scripts\activate
+uvicorn backend.main:app --host 0.0.0.0 --port 8000
+El Swagger estará disponible en: http://127.0.0.1:8000/docs
+
+2. Ejecuta el servicio Flask
+Este servicio corre en el puerto 5005:
+
+bash
+Copiar
+Editar
+python app.py
+📤 Endpoint disponible
+POST /transcribir
+Envía un archivo .mp3 y recibe el archivo .srt.
+
+✅ Ejemplo con curl
+bash
+Copiar
+Editar
+curl -X POST http://127.0.0.1:5005/transcribir \
+  -F "file=@5minutosFinal.mp3" \
+  -o subtitulo.srt
+Este comando guardará el archivo subtitulado como subtitulo.srt.
+
+🛠 Requisitos
+Python 3.10+
+
+Flask
+
+requests
+
+Instalar dependencias:
+
+bash
+Copiar
+Editar
+pip install flask requests
+📂 Estructura del Proyecto
+bash
+Copiar
+Editar
+.
+├── app.py                # Servicio Flask
+├── 5minutosFinal.mp3     # (Ejemplo de audio de entrada)
+└── subtitulos/
+    └── 5minutosFinal.srt # Archivo generado

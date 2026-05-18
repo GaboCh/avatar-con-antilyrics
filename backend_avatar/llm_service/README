@@ -1,0 +1,4 @@
+curl -X POST \
+  -H "Content-Type: application/json" \
+  -d '{"mensaje": "Escribe un poema corto sobre un robot que programa en Python."}' \
+  http://localhost:5004/chat

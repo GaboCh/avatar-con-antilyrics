@@ -1,0 +1,17 @@
+# requirements.txt
+gradio
+requests
+python-dotenv
+moviepy
+pysrt
+instaloader
+yt-dlp>=2026.01.01
+tiktok-uploader
+imageio
+imageio-ffmpeg
+numpy
+pillow
+# --- GUI_TIKTOK: YouTube API ---
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

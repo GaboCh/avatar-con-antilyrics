@@ -1,0 +1,95 @@
+# 🧪 Configurar entorno de desarrollo para proyecto `avatar` (FaceFusion Swap)
+
+Este archivo guía la instalación del entorno virtual para el proyecto que contiene el sistema de Face Swap automático con Instagram y TikTok.
+
+## 📁 Estructura esperada del proyecto
+
+Tu proyecto debe tener una estructura como esta:
+
+```
+avatar/
+├── scripts/
+│   └── auto_swap.py
+├── swap/
+│   ├── modelos/
+│   ├── videos_originales/
+│   └── videos_finales/
+├── requirements.txt
+└── entorno/ ← será creado automáticamente
+```
+
+---
+
+## ✅ PASOS PARA INSTALAR EN OTRA COMPUTADORA
+
+### 1. Clonar o copiar el proyecto completo
+
+Coloca todo el proyecto `avatar/` en cualquier lugar del nuevo equipo.
+
+### 2. Abrir una terminal (CMD o PowerShell)
+
+Ubícate dentro del proyecto copiado:
+
+```bash
+cd ruta\del\proyecto\avatar
+```
+
+### 3. Crear y activar entorno virtual
+
+```bash
+python -m venv entorno
+entorno\Scripts\activate
+```
+
+> 💡 Si usas Git Bash, usa: `source entorno/Scripts/activate`
+
+### 4. Instalar dependencias
+
+```bash
+pip install -r requirements.txt
+```
+
+---
+
+## 📦 ¿Qué se instala?
+
+El archivo `requirements.txt` incluye:
+
+```
+requests
+python-dotenv
+moviepy
+pysrt
+instaloader
+```
+
+---
+
+## 🧪 Verificación
+
+Puedes ejecutar el script de prueba:
+
+```bash
+python scripts/auto_swap.py
+```
+
+Si se crean las carpetas dentro de `swap/`, todo está funcionando correctamente.
+
+---
+
+## 🔁 Para reactivar el entorno en el futuro
+
+Cada vez que abras una nueva terminal, activa el entorno con:
+
+```bash
+entorno\Scripts\activate
+```
+
+---
+
+## 🧯 Problemas comunes
+
+- ❌ *"python no se reconoce como comando"*: Agrega Python al PATH durante la instalación.
+- ❌ *"Permission denied" o "No se puede ejecutar el script"*: Asegúrate de tener permisos de administrador o ejecutar PowerShell como admin.
+
+---

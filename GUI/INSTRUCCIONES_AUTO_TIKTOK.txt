@@ -1,0 +1,24 @@
+=== INSTRUCCIONES DE INICIO: AUTOMATIZACIÓN TIKTOK V2 ===
+
+Para iniciar el nuevo sistema de automatización de TikTok sin afectar los archivos originales, sigue estos pasos:
+
+1. INICIAR EL SERVICIO DE GROQ:
+   Abre una terminal y ejecuta:
+   python backend_avatar/groq_service/app.py
+   (Asegúrate de poner tu API Key en el archivo groq_service/app.py o configurarla como variable de entorno GROQ_API_KEY).
+
+2. INICIAR EL SERVICIO DE FACESWAP (ORIGINAL):
+   Abre otra terminal y ejecuta el servicio de FaceSwap que ya tenías (ej: puerto 5100).
+
+3. INICIAR LA NUEVA INTERFAZ (V2):
+   Abre una tercera terminal y ejecuta:
+   python GUI/scripts/auto_swap_gui_v2.py
+
+4. CONFIGURAR Y USAR:
+   - Ve a la nueva pestaña "7. Auto-TikTok".
+   - Introduce el usuario de Instagram (ej: kyliejenner).
+   - Introduce tu Session ID de TikTok (lo obtienes de las cookies de tu navegador).
+   - Pulsa el botón "INICIAR FLUJO CONTINUO".
+   - El sistema descargará, hará swap, generará textos con Groq y subirá a TikTok con esperas de 10-20 minutos automáticamente.
+
+CRÍTICO: Tus archivos originales (auto_swap_gui.py, publicador_automatico.py, etc.) NO han sido modificados. Los nuevos archivos tienen el sufijo "_v2" o están en carpetas nuevas.

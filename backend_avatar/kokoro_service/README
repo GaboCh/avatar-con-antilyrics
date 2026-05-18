@@ -1,0 +1,27 @@
+# Servicio completo con voz específica
+curl -X POST http://localhost:5000/generate_complete \
+  -H "Content-Type: application/json" \
+  -d '{"text": "Hola mundo", "voice": "dora"}' \
+  --output audio_dora.mp3
+
+# Ver voces disponibles
+curl http://localhost:5000/voices
+
+# Documentación
+curl http://localhost:5000/
+
+
+PODCAST
+
+📤 1. Solo generar event_id
+bash
+Copiar
+Editar
+curl -X POST http://127.0.0.1:5000/generate_script ^
+  -F "archivo=@proverbios_20_7.txt"
+📥 2. Generar todo el podcast y descargar
+bash
+Copiar
+Editar
+curl -X POST http://127.0.0.1:5000/generate_podcast_complete ^
+  -F "archivo=@proverbios_20_7.txt" --output podcast.mp3
