@@ -4,7 +4,7 @@ __pycache__/
 venv/
 entorno/
 
-# Videos - no subir al repositorio
+# Videos y audios - no subir al repositorio
 *.mp4
 *.avi
 *.mov
@@ -12,11 +12,15 @@ entorno/
 *.webm
 *.flv
 *.wmv
+*.mp3
 
 # Ignorar videos descargados y resultados temporales de la GUI de TikTok
 GUI_TIKTOK/proyectos_tiktok/videos_originales/
 GUI_TIKTOK/proyectos_tiktok/videos_procesados/
-GUI_TIKTOK/temp_anticopy/
+GUI_TIKTOK/temp_anticopy*/
+
+# Archivos de registro de descargas (generados automaticamente)
+GUI_TIKTOK/proyectos_tiktok/descargados_*.txt
 
 # Secrets and Credentials
 *.pickle
