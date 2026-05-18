@@ -26,7 +26,7 @@ RECETAS = {
     }
 }
 
-NUMERO_DE_CICLOS = 2
+NUMERO_DE_CICLOS = 10
 
 # --- FUNCIONES AUXILIARES ---
 def preparar_entorno():
