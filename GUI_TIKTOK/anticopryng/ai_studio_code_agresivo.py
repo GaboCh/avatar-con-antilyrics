@@ -120,7 +120,7 @@ def procesar_variaciones_multimedia(crf=21, preset="medium", seed=None, entrada_
                 cmd = [
                     ffmpeg_cmd, "-y", "-i", src_path,
                     "-filter_complex", filter_complex,
-                    "-map", "[out]", "-map", "0:a",
+                    "-map", "[out]", "-map", "0:a?",
                     "-af", audio_recipe['af'],
                     "-c:v", "libx264", "-preset", preset, "-crf", str(crf),
                     "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k",
