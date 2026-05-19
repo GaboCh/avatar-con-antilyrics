@@ -236,9 +236,9 @@ def proceso_multi_usuario(
         return
 
     # Colas y señales
-    log_queue = queue.Queue()
-    user_queues = {u: queue.Queue() for u in usuarios}
-    descarga_terminada = threading.Event()
+    log_queue   = queue.Queue()
+    upload_queue = queue.Queue()   # Cola GLOBAL de videos listos para subir
+    descarga_terminada     = threading.Event()
     anticopyright_terminado = threading.Event()
 
     def log(msg):
@@ -318,55 +318,16 @@ def proceso_multi_usuario(
         finally:
             if os.path.exists(work): shutil.rmtree(work)
 
-    def hilo_anticopyright():
-        archivos_vistos = set()
-        en_proceso = {}
-        
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            futuros = []
-            while not descarga_terminada.is_set() or len(archivos_vistos) > 0 or len(en_proceso) > 0:
-                if stop_event.is_set(): break
-                
-                # Buscar archivos nuevos
-                for u in usuarios:
-                    carpeta_in = os.path.join(VIDEOS_ORIGINALES, u)
-                    if not os.path.exists(carpeta_in): continue
-                    actuales = set(glob.glob(os.path.join(carpeta_in, '*.mp4')))
-                    nuevos = actuales - archivos_vistos - set(en_proceso.keys())
-                    
-                    for vid in nuevos:
-                        en_proceso[vid] = u
-                        futuros.append(executor.submit(procesar_un_video, vid, u))
-                
-                # Revisar terminados
-                for f in list(futuros):
-                    if f.done():
-                        res = f.result()
-                        # Buscar a que original correspondia este futuro
-                        # Como no pasamos el original en el result, lo rastreamos por orden no es seguro.
-                        # Mejor pasar el path original en el result.
-                        pass
-                
-                # Forma segura:
-                # Modificamos procesar_un_video para devolver (original, destino)
-                # Pero como ya se hizo la lambda, iteramos manual:
-                for f in list(futuros):
-                    if f.done():
-                        # Para evitar bloqueos, mejor usar diccionario de futuros
-                        pass
-                
-                time.sleep(1.0)
-                if descarga_terminada.is_set() and not futuros: break
-
-    # REESCRIBIMOS HILO ANTICOPYRIGHT MAS SEGURO
+    # HILO 2: ANTICOPYRIGHT (versión con cola global)
     def hilo_anticopyright_seguro():
         en_proceso = set()
         procesados = set()
         
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futuros = {} # futuro -> (original_path, usuario)
+            futuros = {}  # futuro -> (original_path, usuario)
             
             while not stop_event.is_set():
+                # Buscar archivos nuevos en todas las carpetas de usuarios
                 for u in usuarios:
                     carpeta_in = os.path.join(VIDEOS_ORIGINALES, u)
                     if os.path.exists(carpeta_in):
@@ -378,85 +339,80 @@ def proceso_multi_usuario(
                             futuros[f] = (vid, u)
                 
                 # Chequear futuros completados
-                terminados = [f for f in futuros if f.done()]
+                terminados = [f for f in list(futuros) if f.done()]
                 for f in terminados:
                     orig_path, u = futuros.pop(f)
                     dest_path = f.result()
-                    en_proceso.remove(orig_path)
+                    en_proceso.discard(orig_path)
                     procesados.add(orig_path)
                     
                     if dest_path:
-                        log(f"   🛡️ Listo: {os.path.basename(dest_path)}")
-                        user_queues[u].put(dest_path)
+                        log(f"   🛡️ Listo para subir: {os.path.basename(dest_path)}")
+                        upload_queue.put(dest_path)   # ← Cola GLOBAL
                     else:
                         log(f"   ❌ Error procesando: {os.path.basename(orig_path)}")
                 
                 if descarga_terminada.is_set() and len(futuros) == 0:
                     break
                 time.sleep(1.0)
-                
-        # Avisar a la cola de subidas que ya no hay mas
-        for u in usuarios:
-            user_queues[u].put("DONE")
-        anticopyright_terminado.set()
-        log("🏁 Fase Anticopyright terminada.")
-
-    # -------------------------------------------------------------
-    # HILO 3: UPLOADER ROUND-ROBIN
-    # -------------------------------------------------------------
-    def hilo_upload():
-        activos = list(usuarios)
-        idx_canal = 0
-        extra_tags = [t.strip() for t in tags_base.split(',') if t.strip()]
         
-        while activos and not stop_event.is_set():
-            for u in list(activos):
-                if stop_event.is_set(): break
+        # Señal de fin: un solo sentinel DONE
+        upload_queue.put("DONE")
+        anticopyright_terminado.set()
+        log("🏁 Fase Anticopyright terminada. Cola de subida cerrada.")
+
+    # HILO 3: UPLOADER (cola global, round-robin de canales)
+    def hilo_upload():
+        idx_canal   = 0
+        extra_tags  = [t.strip() for t in tags_base.split(',') if t.strip()]
+        
+        while not stop_event.is_set():
+            try:
+                video_path = upload_queue.get(timeout=3)   # espera hasta 3 seg el próximo video
+            except queue.Empty:
+                # Si anticopyright ya terminó y la cola sigue vacía, salimos
+                if anticopyright_terminado.is_set():
+                    break
+                continue   # si no, seguimos esperando
+            
+            if video_path == "DONE":
+                break
+            
+            # Elegir canal en round-robin
+            canal   = canales_activos[idx_canal % len(canales_activos)]
+            idx_canal += 1
+            youtube = youtube_por_canal[canal]
+            
+            nombre        = os.path.basename(video_path)
+            titulo_tiktok = os.path.splitext(nombre)[0].split('__')[0].replace('_', ' ').strip()
+            titulo = titulo_base.strip() if titulo_base.strip() else titulo_tiktok or "Video"
+            desc   = descripcion or ''
+            
+            if es_shorts:
+                if '#Shorts' not in titulo: titulo += " #Shorts"
+                if '#Shorts' not in desc:   desc    = f"#Shorts #Short\n{desc}"
+            
+            log(f"\n📤 Subiendo a '{canal}': {nombre}")
+            try:
+                tags = subidor_youtube.obtener_tags_trending(youtube, extra_tags=extra_tags)
+                if tags_modo == '❌ Sin tags':                                 tags = []
+                elif tags_modo == '🎲 Aleatorio' and random.random() < 0.5: tags = []
                 
-                # Intentamos sacar n_por_usuario videos
-                subidos_este_turno = 0
-                while subidos_este_turno < n_por_usuario:
-                    try:
-                        video_path = user_queues[u].get(timeout=2)
-                        if video_path == "DONE":
-                            if u in activos: activos.remove(u)
-                            break
-                        
-                        canal = canales_activos[idx_canal % len(canales_activos)]
-                        idx_canal += 1
-                        youtube = youtube_por_canal[canal]
-                        
-                        nombre = os.path.basename(video_path)
-                        titulo_tiktok = os.path.splitext(nombre)[0].split('__')[0].replace('_', ' ').strip()
-                        titulo = f"{titulo_base}" if titulo_base.strip() else titulo_tiktok or "Video"
-                        desc = descripcion or ''
-                        
-                        if es_shorts:
-                            if '#Shorts' not in titulo: titulo += " #Shorts"
-                            if '#Shorts' not in desc: desc = f"#Shorts #Short\n{desc}"
-                            
-                        log(f"\n📤 Subiendo a '{canal}': {nombre}")
-                        try:
-                            tags = subidor_youtube.obtener_tags_trending(youtube, extra_tags=extra_tags)
-                            if tags_modo == '❌ Sin tags': tags = []
-                            elif tags_modo == '🎲 Aleatorio' and random.random() < 0.5: tags = []
-                            
-                            subidor_youtube.subir_video(youtube, video_path, titulo, desc, tags=tags)
-                            log("   ✅ Subido exitosamente")
-                        except Exception as e:
-                            log(f"   ❌ Error subiendo: {e}")
-                            
-                        subidos_este_turno += 1
-                        
-                        if activos: # Esperar antes del siguiente (o si hay otro video en el turno)
-                            espera = 4 * 60 if modo_prueba else random.randint(15, 30) * 60
-                            log(f"   ⏳ Esperando {espera//60} min...")
-                            time.sleep(espera)
-                            
-                    except queue.Empty:
-                        # Si no hay video listo de este usuario en 2 segs, pasamos al siguiente usuario temporalmente
-                        # para no bloquear si otro usuario ya tiene videos listos.
-                        break
+                subidor_youtube.subir_video(youtube, video_path, titulo, desc, tags=tags)
+                log("   ✅ Subido exitosamente")
+            except Exception as e:
+                log(f"   ❌ Error subiendo: {e}")
+            
+            # Esperar entre subidas (anti-spam YouTube)
+            # Mientras dormimos, los otros 2 hilos siguen descargando y procesando
+            if not anticopyright_terminado.is_set() or not upload_queue.empty():
+                espera = 4 * 60 if modo_prueba else random.randint(15, 30) * 60
+                log(f"   ⏳ Esperando {espera//60} min antes del siguiente (descarga y anticopyright siguen corriendo)...")
+                tiempo_inicio = time.time()
+                while time.time() - tiempo_inicio < espera:
+                    if stop_event.is_set(): return
+                    time.sleep(5)   # revisa cada 5 seg si se pidó detener
+        
         log("🏁 Todos los uploads terminados.")
 
     # Arrancar hilos
