@@ -645,7 +645,7 @@ def _mu_borrar_y_estado(nombre):
 def _mu_iniciar(texto_usuarios, *rest):
     """
     Wrapper que recoge nombres y checks del UI y llama proceso_multi_usuario.
-    rest = [name0..name7, ch0..ch7, max, rr, ciclos, prueba, titulo, desc, shorts, tags, tags_modo]
+    rest = [name0..name7, ch0..ch7, max, rr, ciclos, prueba, titulo, desc, shorts, tags, tags_modo, usar_base, usar_app_video]
     """
     n      = _MU_MAX_CANALES
     names  = rest[:_MU_MAX_CANALES]
@@ -658,12 +658,12 @@ def _mu_iniciar(texto_usuarios, *rest):
         return
 
     texto_canales                                                    = '\n'.join(canales_activos)
-    max_v, rr, ciclos, prueba, titulo, desc, shorts, tags, tags_modo = params
+    max_v, rr, ciclos, prueba, titulo, desc, shorts, tags, tags_modo, usar_base, usar_app_video = params
 
     yield from multi_usuario.proceso_multi_usuario(
         texto_usuarios, texto_canales,
         max_v, rr, ciclos,
-        prueba, titulo, desc, shorts, tags, tags_modo
+        prueba, titulo, desc, shorts, tags, tags_modo, usar_base, usar_app_video
     )
 
 
@@ -869,7 +869,7 @@ with gr.Blocks() as demo:
             with gr.Row():
                 mu_max    = gr.Slider(minimum=1, maximum=100, value=10, step=1, label="Videos por usuario")
                 mu_rr     = gr.Slider(minimum=1, maximum=10,  value=2,  step=1, label="Videos por usuario antes de cambiar canal")
-                mu_ciclos = gr.Slider(minimum=1, maximum=5,   value=2,  step=1, label="Ciclos anticopyright")
+                mu_ciclos = gr.Slider(minimum=1, maximum=5,   value=2,  step=1, label="Ciclos anticopyright", interactive=False)
             with gr.Row():
                 mu_titulo = gr.Textbox(label="Titulo base YouTube", value="Video", placeholder="Mi video")
                 mu_desc   = gr.Textbox(label="Descripcion", lines=2, placeholder="Descripcion para todos los videos")
@@ -880,7 +880,9 @@ with gr.Blocks() as demo:
             )
             with gr.Row():
                 mu_shorts    = gr.Checkbox(label="Subir como Shorts", value=True)
-                mu_prueba    = gr.Checkbox(label="Modo prueba (4 min entre subidas)", value=True)
+                mu_prueba    = gr.Checkbox(label="Modo prueba (4 min)", value=True)
+                mu_usar_base = gr.Checkbox(label="Usar filtro base 65/35", value=True)
+                mu_usar_app_video = gr.Checkbox(label="Usar ciclos de efectos sutiles (app_video.py)", value=False)
                 mu_tags_modo = gr.Radio(
                     choices=["✅ Siempre con tags", "🎲 Aleatorio", "❌ Sin tags"],
                     value="🎲 Aleatorio", label="Modo de tags"
@@ -918,10 +920,14 @@ with gr.Blocks() as demo:
     for _i in range(_MU_MAX_CANALES):
         mu_auth_btns[_i].click(fn=_mu_autenticar_y_estado, inputs=[mu_names[_i]], outputs=[mu_console, mu_status[_i]])
         mu_del_btns[_i].click(fn=_mu_borrar_y_estado, inputs=[mu_names[_i]], outputs=[mu_console, mu_status[_i]])
+    
+    # Interacción de UI para desactivar slider de ciclos si el checkbox está apagado
+    mu_usar_app_video.change(fn=lambda x: gr.update(interactive=x), inputs=mu_usar_app_video, outputs=mu_ciclos)
+
     btn_mu_iniciar.click(
         fn=_mu_iniciar,
         inputs=[mu_usuarios] + mu_names + mu_checks +
-               [mu_max, mu_rr, mu_ciclos, mu_prueba, mu_titulo, mu_desc, mu_shorts, mu_tags, mu_tags_modo],
+               [mu_max, mu_rr, mu_ciclos, mu_prueba, mu_titulo, mu_desc, mu_shorts, mu_tags, mu_tags_modo, mu_usar_base, mu_usar_app_video],
         outputs=mu_console
     )
     btn_mu_detener.click(fn=multi_usuario.detener, outputs=mu_console)

@@ -194,15 +194,21 @@ def construir_cola_round_robin(usuarios, n_por_usuario):
 # ORQUESTADOR PRINCIPAL
 # ─────────────────────────────────────────────
 
+import queue
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 def proceso_multi_usuario(
     texto_usuarios, texto_canales,
     max_videos, n_por_usuario, num_ciclos,
     modo_prueba, titulo_base, descripcion,
-    es_shorts, tags_base, tags_modo
+    es_shorts, tags_base, tags_modo, usar_base, usar_app_video
 ):
     """
-    Generador que yield mensajes de progreso para la GUI.
-    Flujo: descarga → anticopyright → cola round-robin → subida multi-canal.
+    Pipeline Asíncrono Multi-Usuario:
+    Hilo 1: Descarga videos secuencialmente.
+    Hilo 2: Anticopyright (Obligatorio 65/35 -> Opcional app_video) en cuanto llegan.
+    Hilo 3: Subida Round-Robin a múltiples canales en cuanto están procesados.
     """
     sys.path.insert(0, script_dir)
     import subidor_youtube
@@ -213,147 +219,264 @@ def proceso_multi_usuario(
     usuarios = parsear_lista(texto_usuarios)
     canales  = parsear_lista(texto_canales)
 
-    if not usuarios:
-        yield "❌ Ingresa al menos un usuario de TikTok."
-        return
-    if not canales:
-        yield "❌ Ingresa al menos un canal de YouTube."
+    if not usuarios or not canales:
+        yield "❌ Ingresa al menos un usuario y un canal."
         return
 
-    # Verificar canales autenticados
-    no_auth = [c for c in canales if not multi_canal_auth.canal_autenticado(c)]
-    if no_auth:
-        yield "❌ Los siguientes canales no estan autenticados:"
-        for c in no_auth:
-            yield f"   — {c}"
-        yield "   Ve a la Pestana 1 → Gestion de Canales y autentica cada uno."
-        return
-
-    yield f"🚀 MULTI-USUARIO INICIADO\nUsuarios : {usuarios}\nCanales  : {canales}\n{'='*60}"
-
-    # ── PASO 1: Descarga ──────────────────────────────────────
-    yield "\n📥 PASO 1/3 — Descargando videos por usuario..."
-    cookies_ok = False
-    if os.path.exists(COOKIES_FILE):
-        with open(COOKIES_FILE, encoding='utf-8') as _f:
-            cookies_ok = any(l.strip() and not l.startswith('#') for l in _f)
-    if not cookies_ok:
-        yield "⚠️  Cookies vacias. Configuralas en la Pestana 1 antes de continuar."
-        return
-
-    for u in usuarios:
-        if stop_event.is_set():
-            yield "⏹️ Proceso detenido por el usuario."
-            return
-        yield f"   📥 Descargando @{u} (max {int(max_videos)} videos)..."
-        try:
-            videos, stdout, code = descargar_usuario(u, max_videos)
-            yield f"   ✅ @{u}: {len(videos)} videos en carpeta"
-            if stdout:
-                for linea in stdout.strip().splitlines()[-5:]:
-                    yield f"      {linea}"
-        except Exception as e:
-            yield f"   ❌ @{u}: Error — {e}"
-
-    # ── PASO 2: Anticopyright ─────────────────────────────────
-    yield f"\n🛡️ PASO 2/3 — Anticopyright ({int(num_ciclos)} ciclos)..."
-    if not os.path.exists(APP_VIDEO_SCRIPT):
-        yield f"❌ No se encontro app_video.py en: {GUI_ANTICOPY_DIR}"
-        return
-
-    for u in usuarios:
-        if stop_event.is_set():
-            yield "Proceso detenido por el usuario."
-            return
-        yield f"   >> Procesando @{u} con anticopyright..."
-        try:
-            procesados = []
-            for item in procesar_usuario(u, num_ciclos, es_shorts):
-                if isinstance(item, list):
-                    # Ultimo valor: lista de archivos procesados
-                    procesados = item
-                else:
-                    # Linea de log en tiempo real
-                    yield item
-            yield f"   OK @{u}: {len(procesados)} videos procesados"
-        except Exception as e:
-            yield f"   ERR @{u}: {e}"
-
-    # ── PASO 3: Cola round-robin ──────────────────────────────
-    yield f"\n📋 PASO 3/3 — Construyendo cola round-robin ({int(n_por_usuario)} por usuario)..."
-    cola = construir_cola_round_robin(usuarios, int(n_por_usuario))
-    yield f"   Total videos a subir: {len(cola)}"
-
-    if not cola:
-        yield "❌ No hay videos procesados para subir. Verifica el paso anterior."
-        return
-
-    # ── PASO 4: Autenticar canales ────────────────────────────
-    yield "\n🔑 Autenticando canales de YouTube..."
+    # Autenticar canales
     youtube_por_canal = {}
     for canal in canales:
         yt = multi_canal_auth.obtener_youtube_canal(canal)
         if yt:
             youtube_por_canal[canal] = yt
-            yield f"   ✅ Canal '{canal}' listo"
-        else:
-            yield f"   ❌ Canal '{canal}' fallo autenticacion — se omitira"
-
-    if not youtube_por_canal:
-        yield "❌ Ningun canal pudo autenticarse. Proceso detenido."
+            
+    canales_activos = [c for c in canales if c in youtube_por_canal]
+    if not canales_activos:
+        yield "❌ Ningún canal pudo autenticarse. Proceso detenido."
         return
 
-    canales_activos = [c for c in canales if c in youtube_por_canal]
-    extra_tags = [t.strip() for t in tags_base.split(',') if t.strip()]
+    # Colas y señales
+    log_queue = queue.Queue()
+    user_queues = {u: queue.Queue() for u in usuarios}
+    descarga_terminada = threading.Event()
+    anticopyright_terminado = threading.Event()
 
-    # ── PASO 5: Subida intercalada ────────────────────────────
-    yield f"\n📤 Iniciando subida — {len(cola)} videos → {len(canales_activos)} canales...\n{'='*60}"
+    def log(msg):
+        log_queue.put(msg)
 
-    for idx, (video_path, usuario_origen) in enumerate(cola):
-        if stop_event.is_set():
-            yield "⏹️ Scheduler detenido por el usuario."
-            return
+    yield f"🚀 MULTI-USUARIO INICIADO (FÁBRICA ASÍNCRONA)\nUsuarios : {usuarios}\nCanales  : {canales_activos}\n{'='*60}"
 
-        canal   = canales_activos[idx % len(canales_activos)]
-        youtube = youtube_por_canal[canal]
-        nombre  = os.path.basename(video_path)
+    # -------------------------------------------------------------
+    # HILO 1: DESCARGA
+    # -------------------------------------------------------------
+    def hilo_descarga():
+        for u in usuarios:
+            if stop_event.is_set(): break
+            log(f"📥 Descargando @{u}...")
+            try:
+                descargar_usuario(u, max_videos)
+                log(f"✅ Descarga de @{u} completada.")
+            except Exception as e:
+                log(f"❌ Error descargando @{u}: {e}")
+        descarga_terminada.set()
+        log("🏁 Fase de descargas terminada.")
 
-        titulo_tiktok = os.path.splitext(nombre)[0].split('__')[0].replace('_', ' ').strip()
-        titulo = f"{titulo_base} {idx+1}" if titulo_base.strip() else titulo_tiktok or f"Video {idx+1}"
-        desc   = descripcion or ''
-
-        if es_shorts:
-            if '#Shorts' not in titulo:
-                titulo = f"{titulo} #Shorts"
-            if '#Shorts' not in desc:
-                desc = f"#Shorts #Short\n{desc}"
-
-        yield (f"\n📤 [{idx+1}/{len(cola)}] @{usuario_origen} → Canal '{canal}'\n"
-               f"   Archivo: {nombre}\n"
-               f"   Titulo : {titulo}")
-
+    # -------------------------------------------------------------
+    # HILO 2: ANTICOPYRIGHT
+    # -------------------------------------------------------------
+    def procesar_un_video(video_path, u):
+        idx = random.randint(1000, 9999)
+        work = os.path.join(gui_tiktok_dir, f'temp_multi_{u}_{idx}')
+        w_in = os.path.join(work, 'in')
+        w_out1 = os.path.join(work, 'out1')
+        w_out2 = os.path.join(work, 'out2')
+        
         try:
-            tags = subidor_youtube.obtener_tags_trending(youtube, extra_tags=extra_tags)
-            if tags_modo == '❌ Sin tags':
-                tags = []
-            elif tags_modo == '🎲 Aleatorio' and random.random() < 0.5:
-                tags = []
+            os.makedirs(w_in, exist_ok=True)
+            os.makedirs(w_out1, exist_ok=True)
+            os.makedirs(w_out2, exist_ok=True)
+            shutil.copy(video_path, w_in)
+            
+            video_listo = video_path
+            current_in = w_in
+            
+            # 1. Filtro Base (65/35 achatado + plasma)
+            if usar_base:
+                log(f"   ⚙️ Entrando en base 35 65 (ai_studio_code_agresivo) para {os.path.basename(video_path)}...")
+                script_base = os.path.join(GUI_ANTICOPY_DIR, 'ai_studio_code_agresivo.py')
+                p1 = subprocess.run([sys.executable, "-u", script_base, current_in, w_out1], capture_output=True, text=True, errors='ignore')
+                for linea in p1.stdout.splitlines():
+                    if linea.strip(): log(f"      [65/35] {linea.strip()}")
+                
+                archivos_out1 = glob.glob(os.path.join(w_out1, '*.mp4'))
+                if not archivos_out1: return None
+                video_listo = archivos_out1[0]
+                current_in = w_out1
+            
+            # 2. Filtro Sutil (app_video.py) - OPCIONAL
+            if usar_app_video:
+                log(f"   ⚙️ Entrando a app_video.py (ciclos) para {os.path.basename(video_path)}...")
+                p2 = subprocess.run([sys.executable, "-u", APP_VIDEO_SCRIPT, current_in, w_out2, str(int(num_ciclos)), "1" if es_shorts else "0"], capture_output=True, text=True, errors='ignore')
+                for linea in p2.stdout.splitlines():
+                    if linea.strip(): log(f"      [app_video] {linea.strip()}")
+                
+                archivos_out2 = glob.glob(os.path.join(w_out2, '*.mp4'))
+                if archivos_out2: video_listo = archivos_out2[0]
+            
+            if not usar_base and not usar_app_video:
+                # Si apagó todo, igual lo movemos a procesados para que se suba
+                video_listo = os.path.join(w_out1, os.path.basename(video_path))
+                shutil.copy(video_path, video_listo)
+            
+            carpeta_out_final = os.path.join(VIDEOS_PROCESADOS, u)
+            os.makedirs(carpeta_out_final, exist_ok=True)
+            destino_final = os.path.join(carpeta_out_final, os.path.basename(video_listo))
+            shutil.move(video_listo, destino_final)
+            return destino_final
+        except Exception:
+            return None
+        finally:
+            if os.path.exists(work): shutil.rmtree(work)
 
-            subidor_youtube.subir_video(youtube, video_path, titulo, desc, tags=tags)
-            yield "   ✅ Subido correctamente"
-        except Exception as e:
-            yield f"   ❌ Error al subir: {e}"
-            continue
+    def hilo_anticopyright():
+        archivos_vistos = set()
+        en_proceso = {}
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = []
+            while not descarga_terminada.is_set() or len(archivos_vistos) > 0 or len(en_proceso) > 0:
+                if stop_event.is_set(): break
+                
+                # Buscar archivos nuevos
+                for u in usuarios:
+                    carpeta_in = os.path.join(VIDEOS_ORIGINALES, u)
+                    if not os.path.exists(carpeta_in): continue
+                    actuales = set(glob.glob(os.path.join(carpeta_in, '*.mp4')))
+                    nuevos = actuales - archivos_vistos - set(en_proceso.keys())
+                    
+                    for vid in nuevos:
+                        en_proceso[vid] = u
+                        futuros.append(executor.submit(procesar_un_video, vid, u))
+                
+                # Revisar terminados
+                for f in list(futuros):
+                    if f.done():
+                        res = f.result()
+                        # Buscar a que original correspondia este futuro
+                        # Como no pasamos el original en el result, lo rastreamos por orden no es seguro.
+                        # Mejor pasar el path original en el result.
+                        pass
+                
+                # Forma segura:
+                # Modificamos procesar_un_video para devolver (original, destino)
+                # Pero como ya se hizo la lambda, iteramos manual:
+                for f in list(futuros):
+                    if f.done():
+                        # Para evitar bloqueos, mejor usar diccionario de futuros
+                        pass
+                
+                time.sleep(1.0)
+                if descarga_terminada.is_set() and not futuros: break
 
-        if idx < len(cola) - 1:
-            espera = 4 * 60 if modo_prueba else random.randint(15, 30) * 60
-            mins   = espera // 60
-            yield f"   ⏳ Esperando {mins} min antes del siguiente..."
-            time.sleep(espera)
+    # REESCRIBIMOS HILO ANTICOPYRIGHT MAS SEGURO
+    def hilo_anticopyright_seguro():
+        en_proceso = set()
+        procesados = set()
+        
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futuros = {} # futuro -> (original_path, usuario)
+            
+            while not stop_event.is_set():
+                for u in usuarios:
+                    carpeta_in = os.path.join(VIDEOS_ORIGINALES, u)
+                    if os.path.exists(carpeta_in):
+                        actuales = set(glob.glob(os.path.join(carpeta_in, '*.mp4')))
+                        nuevos = actuales - en_proceso - procesados
+                        for vid in nuevos:
+                            en_proceso.add(vid)
+                            f = executor.submit(procesar_un_video, vid, u)
+                            futuros[f] = (vid, u)
+                
+                # Chequear futuros completados
+                terminados = [f for f in futuros if f.done()]
+                for f in terminados:
+                    orig_path, u = futuros.pop(f)
+                    dest_path = f.result()
+                    en_proceso.remove(orig_path)
+                    procesados.add(orig_path)
+                    
+                    if dest_path:
+                        log(f"   🛡️ Listo: {os.path.basename(dest_path)}")
+                        user_queues[u].put(dest_path)
+                    else:
+                        log(f"   ❌ Error procesando: {os.path.basename(orig_path)}")
+                
+                if descarga_terminada.is_set() and len(futuros) == 0:
+                    break
+                time.sleep(1.0)
+                
+        # Avisar a la cola de subidas que ya no hay mas
+        for u in usuarios:
+            user_queues[u].put("DONE")
+        anticopyright_terminado.set()
+        log("🏁 Fase Anticopyright terminada.")
 
-    yield f"\n{'*'*60}\n✅ PROCESO MULTI-USUARIO COMPLETADO\n{'*'*60}"
+    # -------------------------------------------------------------
+    # HILO 3: UPLOADER ROUND-ROBIN
+    # -------------------------------------------------------------
+    def hilo_upload():
+        activos = list(usuarios)
+        idx_canal = 0
+        extra_tags = [t.strip() for t in tags_base.split(',') if t.strip()]
+        
+        while activos and not stop_event.is_set():
+            for u in list(activos):
+                if stop_event.is_set(): break
+                
+                # Intentamos sacar n_por_usuario videos
+                subidos_este_turno = 0
+                while subidos_este_turno < n_por_usuario:
+                    try:
+                        video_path = user_queues[u].get(timeout=2)
+                        if video_path == "DONE":
+                            if u in activos: activos.remove(u)
+                            break
+                        
+                        canal = canales_activos[idx_canal % len(canales_activos)]
+                        idx_canal += 1
+                        youtube = youtube_por_canal[canal]
+                        
+                        nombre = os.path.basename(video_path)
+                        titulo_tiktok = os.path.splitext(nombre)[0].split('__')[0].replace('_', ' ').strip()
+                        titulo = f"{titulo_base}" if titulo_base.strip() else titulo_tiktok or "Video"
+                        desc = descripcion or ''
+                        
+                        if es_shorts:
+                            if '#Shorts' not in titulo: titulo += " #Shorts"
+                            if '#Shorts' not in desc: desc = f"#Shorts #Short\n{desc}"
+                            
+                        log(f"\n📤 Subiendo a '{canal}': {nombre}")
+                        try:
+                            tags = subidor_youtube.obtener_tags_trending(youtube, extra_tags=extra_tags)
+                            if tags_modo == '❌ Sin tags': tags = []
+                            elif tags_modo == '🎲 Aleatorio' and random.random() < 0.5: tags = []
+                            
+                            subidor_youtube.subir_video(youtube, video_path, titulo, desc, tags=tags)
+                            log("   ✅ Subido exitosamente")
+                        except Exception as e:
+                            log(f"   ❌ Error subiendo: {e}")
+                            
+                        subidos_este_turno += 1
+                        
+                        if activos: # Esperar antes del siguiente (o si hay otro video en el turno)
+                            espera = 4 * 60 if modo_prueba else random.randint(15, 30) * 60
+                            log(f"   ⏳ Esperando {espera//60} min...")
+                            time.sleep(espera)
+                            
+                    except queue.Empty:
+                        # Si no hay video listo de este usuario en 2 segs, pasamos al siguiente usuario temporalmente
+                        # para no bloquear si otro usuario ya tiene videos listos.
+                        break
+        log("🏁 Todos los uploads terminados.")
 
+    # Arrancar hilos
+    t_descarga = threading.Thread(target=hilo_descarga)
+    t_anticopy = threading.Thread(target=hilo_anticopyright_seguro)
+    t_upload   = threading.Thread(target=hilo_upload)
+    
+    t_descarga.start()
+    t_anticopy.start()
+    t_upload.start()
+
+    historial_log = []
+    while t_descarga.is_alive() or t_anticopy.is_alive() or t_upload.is_alive() or not log_queue.empty():
+        while not log_queue.empty():
+            historial_log.append(log_queue.get())
+        if historial_log:
+            yield "\n".join(historial_log[-40:])
+        time.sleep(0.5)
+
+    yield "\n".join(historial_log[-40:]) + "\n\n🎉 PROCESO MULTI-USUARIO ASÍNCRONO COMPLETADO."
 
 def detener():
-    """Senaliza al proceso para que se detenga despues del video actual."""
     stop_event.set()
